@@ -92,6 +92,9 @@ mod standby_host;
 #[path = "split_client_keys.rs"]
 mod split_client_keys;
 
+#[path = "split_burst_one_conn.rs"]
+mod split_burst_one_conn;
+
 #[path = "creating_input.rs"]
 mod creating_input;
 
