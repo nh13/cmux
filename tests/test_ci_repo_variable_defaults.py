@@ -41,6 +41,9 @@ CHEAP_DEFAULTS = {
 
 VARS_REFERENCE = re.compile(r"vars\.([A-Z0-9_]+)")
 RUNS_ON = re.compile(r"^\s*runs-on:\s*(.+?)\s*$")
+POOL_TERMINAL_FALLBACK = re.compile(
+    r"\|\|\s*fromJSON\(vars\.RUNNER_POOLS\)\.[A-Za-z0-9_]+\s*\}\}"
+)
 
 # The repository-side switch for metered macOS capacity. Unset is the cheap
 # reading, so a fork pull request and a repository with no admin action both
@@ -66,6 +69,16 @@ PAID_CAPABLE_RUNNER_VARS = {
     "MACOS_RUNNER_DISPLAY": "blacksmith-6vcpu-macos-15",
     "MACOS_RUNNER_DUAL_XCODE": "blacksmith-6vcpu-macos-15",
     "MACOS_RUNNER_26_LARGE": "blacksmith-12vcpu-macos-26",
+}
+
+# Pool reads are the declared fallback for the same free Blacksmith sizes.
+# They intentionally have no scalar label to fall back to: the pool
+# reconciler may move the live member without a workflow edit.
+PAID_CAPABLE_POOL_DEFAULTS = {
+    "MACOS_RUNNER_15": "fromJSON(vars.RUNNER_POOLS).macos_15",
+    "MACOS_RUNNER_DISPLAY": "fromJSON(vars.RUNNER_POOLS).macos_15",
+    "MACOS_RUNNER_DUAL_XCODE": "fromJSON(vars.RUNNER_POOLS).macos_15",
+    "MACOS_RUNNER_26_LARGE": "fromJSON(vars.RUNNER_POOLS).macos_26_large",
 }
 
 # The gate as it must appear immediately before the read. The lookbehind keeps
@@ -132,12 +145,15 @@ def is_comparison(text: str, end: int) -> bool:
 
 
 def default_chain_reaches_literal(text: str, end: int) -> bool:
-    """True when a chain of `|| vars.Y || 'literal'` ends in a literal."""
+    """True when a chain ends in a literal or declared runner pool."""
     rest = text[end:]
     while True:
         chained = re.match(r"\s*\|\|\s*vars\.[A-Z0-9_]+", rest)
         if chained is None:
-            return re.match(r"\s*\|\|\s*'[^']+'", rest) is not None
+            return re.match(
+                r"\s*\|\|\s*(?:'[^']+'|fromJSON\(vars\.RUNNER_POOLS\)\.[A-Za-z0-9_]+)",
+                rest,
+            ) is not None
         rest = rest[chained.end():]
 
 
@@ -258,7 +274,17 @@ def check_runs_on(path: Path, errors: list[str]) -> None:
         if matched is None:
             continue
         expression = matched.group(1)
-        reads = list(VARS_REFERENCE.finditer(expression))
+        # A terminal declared-pool read is the route's fallback. It replaces
+        # the old scalar literal even when intermediate selectors (overflow,
+        # retry and admission variables) sit between the first read and the
+        # final pool member.
+        if POOL_TERMINAL_FALLBACK.search(expression):
+            continue
+        # RUNNER_POOLS is the declarative route source. Its member read is a
+        # valid terminal fallback; unlike scalar vars it must not be replaced
+        # with a literal label.
+        reads = [read for read in VARS_REFERENCE.finditer(expression)
+                 if read.group(1) != "RUNNER_POOLS"]
         if not reads:
             continue
         if all(pool_read_after_fork_branch(expression, read) for read in reads):
@@ -338,12 +364,14 @@ def check_paid_overflow_gate(path: Path, errors: list[str]) -> None:
                         f"vars.{name} || '{free_label}'`"
                     )
                     continue
-                fallback = re.match(r"\s*\|\|\s*'([^']+)'", line[read.end():])
-                if fallback is None or fallback.group(1) != free_label:
-                    actual = fallback.group(1) if fallback else "nothing"
+                fallback = re.match(r"\s*\|\|\s*(?:'([^']+)'|(fromJSON\(vars\.RUNNER_POOLS\)\.[A-Za-z0-9_]+))",
+                                    line[read.end():])
+                expected_pool = PAID_CAPABLE_POOL_DEFAULTS[name]
+                actual = (fallback.group(1) or fallback.group(2)) if fallback else "nothing"
+                if fallback is None or actual not in (free_label, expected_pool):
                     errors.append(
                         f"{path.name}:{number}: gated vars.{name} falls back to "
-                        f"{actual!r}, but its free steady state is {free_label!r}"
+                        f"{actual!r}, but its free steady state is {free_label!r} or {expected_pool}"
                     )
 
 

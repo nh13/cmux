@@ -87,7 +87,7 @@ verify = re.search(r"^  verify:\n(.*?)(?=^  publish:\n)", publish_text, re.MULTI
 verify_text = verify.group(1) if verify else ""
 check("needs: [sign, runner, sign-blacksmith]" in verify_text,
       "DEV verify must wait for the owned-Mac placement job")
-check("needs.runner.outputs.label" in verify_text and "blacksmith-6vcpu-macos-26" in verify_text,
+check("needs.runner.outputs.label" in verify_text and "fromJSON(vars.RUNNER_POOLS).macos_26" in verify_text,
       "DEV verify must prefer the picked owned Mac and retain a Blacksmith fallback")
 check("workflow_run:" not in publish_text,
       "the publisher must be dispatch-only; unrelated cmux-next completions are not DEV artifacts")

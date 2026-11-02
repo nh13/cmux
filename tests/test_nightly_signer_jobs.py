@@ -38,14 +38,15 @@ SECRET_JOBS = {"signer-app", "signer-app-notary", "signer-dmg"}
 # The cmux NIGHTLY-identity copy through the same release signer, with the macOS legacy signer as its fallback.
 LEGACY_POOL_JOBS = ("legacy-signer-app", "legacy-signer-dmg-image", "legacy-signer-dmg")
 LEGACY_POOL_SECRET_JOBS = {"legacy-signer-app", "legacy-signer-dmg"}
-# The signer route: GitHub-hosted Ubuntu, Blacksmith Linux 4 vCPU on a re-run (the hosted-runner guard's exception).
+# The signer route: GitHub-hosted Ubuntu, the declared Linux 4 vCPU pool on a re-run
+# (the hosted-runner guard's measured exception).
 SIGNER_ROUTE = ("${{ github.repository_owner != 'manaflow-ai' && 'ubuntu-24.04' || "
-                "github.run_attempt > 1 && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}")
+                "github.run_attempt > 1 && fromJSON(vars.RUNNER_POOLS).linux_4 || 'ubuntu-24.04' }}")
 SIGNER_BUILD_ROUTE = ("${{ github.repository_owner != 'manaflow-ai' && 'ubuntu-24.04' || "
                       "needs.decide.outputs.early_attempt == format('{0}', github.run_attempt) && "
                       "contains(needs.decide.outputs.early_linux_jobs, ' signer-build ') && "
                       "needs.decide.outputs.early_linux_runner || "
-                      "github.run_attempt > 1 && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}")
+                      "github.run_attempt > 1 && fromJSON(vars.RUNNER_POOLS).linux_4 || 'ubuntu-24.04' }}")
 VERIFY = ROOT / "scripts/ci/release-signer/verify_appcast_item.py"
 FINAL_DMG = "cmux-nightly-next-signer-final-dmg-${{ needs.resolve-nightly-cmux-tui-client.outputs.build_short_sha }}"
 TIP_APPCAST = ROOT / "scripts/ci/tip_appcast_linux.py"
@@ -160,7 +161,7 @@ class Wiring(unittest.TestCase):
         runs_on = JOBS["signer-build"]["runs-on"]
         self.assertEqual(runs_on, SIGNER_BUILD_ROUTE)
         self.assertLess(runs_on.index("needs.decide.outputs.early_linux_runner"),
-                        runs_on.index("github.run_attempt > 1 && 'blacksmith-4vcpu-ubuntu-2404'"))
+                        runs_on.index("github.run_attempt > 1 && fromJSON(vars.RUNNER_POOLS).linux_4"))
 
     def test_production_signers_take_hosted_ubuntu_then_blacksmith_4vcpu_never_16_or_32(self):
         """The rulebook's measured signing exception (Leo, 2026-11-01): "a small job that is not CPU-bound,
@@ -175,11 +176,12 @@ class Wiring(unittest.TestCase):
             with self.subTest(job=name):
                 self.assertEqual(runs_on, SIGNER_BUILD_ROUTE if name == "signer-build" else SIGNER_ROUTE)
                 self.assertTrue(runs_on.endswith(
-                    "github.run_attempt > 1 && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}"))
+                    "github.run_attempt > 1 && fromJSON(vars.RUNNER_POOLS).linux_4 || 'ubuntu-24.04' }}"))
                 self.assertNotIn("blacksmith-16vcpu", runs_on)
                 self.assertNotIn("blacksmith-32vcpu", runs_on)
+                self.assertNotRegex(runs_on, r"RUNNER_POOLS\)\.linux_(?:16|32)\b")
                 self.assertNotIn("vars.LINUX_RUNNER", runs_on)
-                self.assertNotIn("RUNNER_POOLS", runs_on)
+                self.assertIn("fromJSON(vars.RUNNER_POOLS).linux_4", runs_on)
 
     def test_the_helper_is_notarized_first_and_every_signer_call_is_checked(self):
         steps = {step.get("name"): step for step in JOBS["signer-app"]["steps"]}

@@ -215,8 +215,8 @@ class WebValidationTests(unittest.TestCase):
         self.assertNotIn("vars.LINUX_RUNNER", runs_on)
         self.assertNotIn("4vcpu", runs_on)
         # 16 vCPU (memory for the suite at half the 32 vCPU price), failing over to 32.
-        self.assertTrue(runs_on.endswith("'blacksmith-16vcpu-ubuntu-2404' }}"), runs_on)
-        self.assertIn("vars.CI_CLOUD_OVERFLOW_SAVED && 'blacksmith-32vcpu-ubuntu-2404'", runs_on)
+        self.assertTrue(runs_on.endswith("fromJSON(vars.RUNNER_POOLS).linux_16 }}"), runs_on)
+        self.assertIn("vars.CI_CLOUD_OVERFLOW_SAVED && fromJSON(vars.RUNNER_POOLS).linux_32", runs_on)
 
     def test_webviews_tests_shard_on_wide_runners(self):
         """Two 8 vCPU shards each ran about 65 dev-server files two at a time for 12 of
@@ -234,7 +234,7 @@ class WebValidationTests(unittest.TestCase):
         shards = [int(n) for n in re.findall(r"^          - shard: (\d+)$", block, re.MULTILINE)]
         counts = set(re.findall(r"^            shard_count: (\d+)$", block, re.MULTILINE))
         self.assertEqual(len(shards), 8)
-        self.assertIn("'blacksmith-16vcpu-ubuntu-2404' }}", block)
+        self.assertIn("fromJSON(vars.RUNNER_POOLS).linux_16 }}", block)
         self.assertEqual(shards, list(range(1, len(shards) + 1)))
         self.assertEqual(counts, {str(len(shards))})
         base_start = workflow.index("  react-apps-base-check:")

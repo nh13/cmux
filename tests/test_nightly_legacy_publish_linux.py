@@ -67,7 +67,7 @@ class Workflow(unittest.TestCase):
         # bounded fallback for older workflow revisions.
         self.assertIn("needs.pick-nightly-sign-runner.outputs.attempt == github.run_attempt && needs.pick-nightly-sign-runner.outputs.linux", runs_on)
         self.assertIn("github.run_attempt > 1 && needs.pick-nightly-sign-runner.outputs.linux_alternate", runs_on)
-        self.assertTrue(runs_on.endswith("|| 'blacksmith-32vcpu-ubuntu-2404' }}"), runs_on)
+        self.assertTrue(runs_on.endswith("|| fromJSON(vars.RUNNER_POOLS).linux_32 }}"), runs_on)
         self.assertNotIn("vars.LINUX_RUNNER", runs_on)
         self.assertNotIn("macos", runs_on)
 

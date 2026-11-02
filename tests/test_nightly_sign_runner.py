@@ -459,7 +459,7 @@ class Workflow(unittest.TestCase):
         for name, picked in SIGNING_JOBS.items():
             with self.subTest(job=name):
                 runs_on = str(jobs[name]["runs-on"])
-                self.assertIn(f"|| {picked} || vars.MACOS_RUNNER_26 || 'blacksmith-6vcpu-macos-26'", runs_on)
+                self.assertIn(f"|| {picked} || vars.MACOS_RUNNER_26 || fromJSON(vars.RUNNER_POOLS).macos_26", runs_on)
                 # A re-run (attempt 2 on) takes the other size: GitHub never re-routes a queued job,
                 # so a label that stalls after the pick is left only by a re-run, which must not
                 # queue on it again (run 40489472569, 2026-10-27).
@@ -474,6 +474,7 @@ class Workflow(unittest.TestCase):
                 runs_on = str(jobs[name]["runs-on"])
                 self.assertTrue(runs_on.endswith(OWNED_FALLBACK), runs_on)
                 self.assertNotIn("blacksmith", runs_on)
+                self.assertNotIn("RUNNER_POOLS", runs_on)
                 self.assertNotIn("MACOS_RUNNER", runs_on)
                 self.assertNotIn("sign_runner", runs_on)
                 self.assertNotIn("sign_alternate", runs_on)
@@ -544,7 +545,7 @@ class OwnedVerify(unittest.TestCase):
                               "(vars.CI_NIGHTLY_NEXT_BUILD_RUNNER || vars.CI_SIDE_LANE_RUNNER) "
                               "|| github.run_attempt > 1 && "
                               "needs.pick-nightly-sign-runner.outputs.alternate || needs.pick-nightly-sign-runner.outputs.runner "
-                              "|| vars.MACOS_RUNNER_26 || 'blacksmith-6vcpu-macos-26'", str(job["runs-on"]))
+                              "|| vars.MACOS_RUNNER_26 || fromJSON(vars.RUNNER_POOLS).macos_26", str(job["runs-on"]))
                 # The launch smoke selects no Xcode: it mounts a DMG and runs the app in it.
                 if name == "launch-smoke-nightly":
                     self.assertNotIn("CMUX_CI_XCODE_APP", job["env"])

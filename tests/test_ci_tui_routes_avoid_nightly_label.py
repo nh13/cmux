@@ -54,6 +54,14 @@ LIVE_VARS = {
     "MACOS_RUNNER_26": NIGHTLY_LABEL,
     "MACOS_RUNNER_BACKGROUND": "blacksmith-6vcpu-macos-15",
     "MACOS_RUNNER_PR": NIGHTLY_LABEL,
+    # Route expressions now read the declared pool member through this JSON
+    # repository variable. Keep the test's live values deterministic while
+    # exercising the same property reads as Actions.
+    "RUNNER_POOLS": json.dumps({
+        name: spec["members"][0]
+        for name, spec in json.loads((ROOT / ".github/runners.json").read_text(encoding="utf-8"))["pools"].items()
+        if not name.startswith("$")
+    }),
 }
 OWNERS = ("manaflow-ai", "someone-else")
 EVENTS = ("push", "pull_request", "pull_request_target", "workflow_dispatch", "schedule")
@@ -126,6 +134,9 @@ def _value(node: tuple, context: dict) -> object:
             return str(args[0]).lower().startswith(str(args[1]).lower())
         if name == "endsWith":
             return str(args[0]).lower().endswith(str(args[1]).lower())
+    if kind == "prop":
+        value = _value(node[1], context)
+        return value.get(node[2]) if isinstance(value, dict) else ""
     raise AssertionError(f"unsupported expression node {node!r}")
 
 

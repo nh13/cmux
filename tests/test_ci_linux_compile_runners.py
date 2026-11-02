@@ -50,6 +50,15 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 BIG = "blacksmith-32vcpu-ubuntu-2404"
 SMALL = "blacksmith-16vcpu-ubuntu-2404"
 
+POOL_BY_LABEL = {
+    "blacksmith-2vcpu-ubuntu-2404": "linux_2",
+    "blacksmith-4vcpu-ubuntu-2404": "linux_4",
+    "blacksmith-8vcpu-ubuntu-2404": "linux_8",
+    "blacksmith-16vcpu-ubuntu-2404": "linux_16",
+    "blacksmith-32vcpu-ubuntu-2404": "linux_32",
+    "blacksmith-4vcpu-ubuntu-2404-arm": "linux_arm64",
+}
+
 # (workflow, job, where the label lives, expected label). `where` is "runs-on",
 # "matrix:<key>=<value>:<field>" for a matrix row, or "env:<step id>:<NAME>"
 # for a runner a planning step hands to the build legs.
@@ -143,16 +152,23 @@ OTHER = {
 FLEET_FIRST = {("cmux-next-fast-gates.yml", "fast-gates", "runs-on")}
 FLEET_RUNNER_LIST = ["cmux-fleet-linux-x64", SMALL, BIG]
 
-LINUX_LABEL = re.compile(r"blacksmith-\d+vcpu-ubuntu-\d+(?!-arm)\b")
 # `vars.LINUX_RUNNER` exactly; `vars.LINUX_RUNNER_DARWIN_CROSS` is its own knob.
 SHARED_VARIABLE = re.compile(r"vars\.LINUX_RUNNER(?!\w)")
+
+
+def pool_ref(label: str) -> str:
+    try:
+        pool = POOL_BY_LABEL[label]
+    except KeyError as error:
+        raise AssertionError(f"no declared pool for {label}") from error
+    return f"fromJSON(vars.RUNNER_POOLS).{pool}"
 
 
 def trusted_fallback(label: str, other: str | None = None) -> str:
     """The size; the other size while the outage record exists; an operator's non-Blacksmith runner first."""
     other = other or (SMALL if label == BIG else BIG)
     return (f"!startsWith(vars.LINUX_RUNNER, 'blacksmith-') && vars.LINUX_RUNNER || "
-            f"vars.CI_CLOUD_OVERFLOW_SAVED && '{other}' || '{label}'")
+            f"vars.CI_CLOUD_OVERFLOW_SAVED && {pool_ref(other)} || {pool_ref(label)}")
 
 
 def fleet_runner_list(value: str) -> list[str]:
@@ -182,6 +198,10 @@ FORK_PR_LABELS = {
     ("cmux-vm-clients.yml", "rust", "runs-on"): "blacksmith-8vcpu-ubuntu-2404",
     ("cmux-vm-clients.yml", "sdk", "runs-on"): SMALL,
     ("remote-daemon.yml", "remote-daemon-tests", "runs-on"): SMALL,
+    ("sdk-publish-crates.yml", "bindings-e2e-rust", "runs-on"): "blacksmith-8vcpu-ubuntu-2404",
+    ("sdk-publish-go.yml", "bindings-e2e-go", "runs-on"): "blacksmith-8vcpu-ubuntu-2404",
+    ("sdk-publish-npm.yml", "bindings-e2e-typescript", "runs-on"): "blacksmith-8vcpu-ubuntu-2404",
+    ("sdk-publish-python.yml", "bindings-e2e-python", "runs-on"): "blacksmith-8vcpu-ubuntu-2404",
 }
 PREFIX: dict[tuple[str, str, str], tuple[str, str]] = {
     # (prefix, closing) for selectors with a special owner/fork expression.
@@ -198,9 +218,11 @@ PREFIX: dict[tuple[str, str, str], tuple[str, str]] = {
     ("cmux-tui-artifacts.yml", "macos-cross-shadow", "runs-on"): (OWNER + "vars.LINUX_RUNNER_DARWIN_CROSS || ", ""),
     ("macos-cross-parity.yml", "linux-build", "runs-on"): (OWNER + "vars.LINUX_RUNNER_DARWIN_CROSS || ", ""),
     ("cmux-tui-build-package.yml", "plan-build", "env:targets:LINUX_DARWIN_RUNNER"): (
-        OWNER + "vars.LINUX_RUNNER_DARWIN_CROSS || ", ""),
+        OWNER + FORK_PULL_REQUEST.format(label="blacksmith-16vcpu-ubuntu-2404")
+        + "vars.LINUX_RUNNER_DARWIN_CROSS || ", ""),
     ("cmux-tui-build-package.yml", "plan-build", "env:targets:LINUX_BUILD_RUNNER"): (
-        OWNER + "(inputs.linux_runner != '' && inputs.linux_runner || vars.LINUX_BUILD_RUNNER || ", ")"),
+        OWNER + FORK_PULL_REQUEST.format(label="blacksmith-16vcpu-ubuntu-2404")
+        + "(inputs.linux_runner != '' && inputs.linux_runner || vars.LINUX_BUILD_RUNNER || ", ")"),
     # Owner-gated jobs with no fork branch.
     ("cmux-next-terminal.yml", "rust-terminal-linux", "runs-on"): ("", ""),
     ("cmux-next-terminal.yml", "swift-terminal-linux", "runs-on"): ("", ""),
@@ -213,19 +235,12 @@ OWNER_ONLY = {
     ("cmux-browser-host-release.yml", "build"),
     ("cmux-mobile-ffi.yml", "rust"),
     ("cmux-mobile-ffi.yml", "android"),
-    ("cmux-next-source-archive.yml", "vt-link-graph"),
     ("cmux-tui-windows-check.yml", "windows-gnu-check"),
     ("iroh-relay-minter.yml", "test"),
-    ("sdk-publish-crates.yml", "bindings-e2e-rust"),
-    ("sdk-publish-go.yml", "bindings-e2e-go"),
     ("sdk-publish-java.yml", "bindings-e2e-java"),
-    ("sdk-publish-npm.yml", "bindings-e2e-typescript"),
-    ("sdk-publish-python.yml", "bindings-e2e-python"),
     ("cmux-next-web-bundle-publish.yml", "build"),
     ("presence.yml", "test"),
     ("sdk-bootstrap-crates.yml", "build"),
-    ("sdk-publish-go.yml", "validate-go-module"),
-    ("sdk-publish-go.yml", "verify-versioned-go-module"),
 }
 
 
@@ -277,9 +292,7 @@ class LinuxCompileRunners(unittest.TestCase):
                     self.assertEqual(fleet_runner_list(value), FLEET_RUNNER_LIST)
                     self.assertNotIn("vars.LINUX_RUNNER", value)
                     continue
-                labels = LINUX_LABEL.findall(value)
-                self.assertTrue(labels, f"{workflow}:{job_id} {where} names no Blacksmith Ubuntu label: {value}")
-                self.assertEqual(labels[-1], label, f"{workflow}:{job_id} {where}: {value}")
+                self.assertIn(pool_ref(label), value, f"{workflow}:{job_id} {where} names no {pool_ref(label)} route: {value}")
                 # vars.LINUX_RUNNER appears only in the outage guard, never as
                 # a plain `vars.LINUX_RUNNER ||` that would pick 4 vCPU.
                 self.assertEqual(
